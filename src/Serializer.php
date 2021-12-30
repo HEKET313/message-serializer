@@ -7,10 +7,12 @@ namespace Happyr\MessageSerializer;
 use Happyr\MessageSerializer\Hydrator\ArrayToMessageInterface;
 use Happyr\MessageSerializer\Hydrator\Exception\HydratorException;
 use Happyr\MessageSerializer\Transformer\MessageToArrayInterface;
+use http\Env;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
 use Symfony\Component\Messenger\Stamp\NonSendableStampInterface;
 use Symfony\Component\Messenger\Stamp\RedeliveryStamp;
+use Symfony\Component\Messenger\Stamp\StampInterface;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
 
 final class Serializer implements SerializerInterface
@@ -49,6 +51,9 @@ final class Serializer implements SerializerInterface
             throw new MessageDecodingFailedException('Failed to decode message', 0, $e);
         }
 
+        $stamps = $this->decodeStamps($encodedEnvelope);
+        $envelope = $envelope->with(...$stamps);
+
         return $this->addMetaToEnvelope($meta, $envelope);
     }
 
@@ -63,9 +68,30 @@ final class Serializer implements SerializerInterface
         $message['_meta'] = $this->getMetaFromEnvelope($envelope);
 
         return [
-            'headers' => ['Content-Type' => 'application/json'],
+            'headers' => array_merge(['Content-Type' => 'application/json'], $this->encodeStamps($envelope)),
             'body' => \json_encode($message),
         ];
+    }
+
+    /**
+     * @return StampInterface[]
+     */
+    private function decodeStamps(array $encodedEnvelope): array
+    {
+        $stamps = [];
+        foreach ($encodedEnvelope['headers'] ?? [] as $name => $value) {
+            $stamps[] = new CustomHeaderStamp($name, $value);
+        }
+        return $stamps;
+    }
+
+    private function encodeStamps(Envelope $envelope): array
+    {
+        $headers = [];
+        foreach ($envelope->all(CustomHeaderStamp::class) as $stamp) {
+            $headers[$stamp->getName()] = $stamp->getValue();
+        }
+        return $headers;
     }
 
     private function getMetaFromEnvelope(Envelope $envelope): array
